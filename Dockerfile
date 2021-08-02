@@ -16,7 +16,7 @@ RUN go env -w GOPRIVATE="*.code.meikeland.com"
 # 将vendor包优先在打包环节使用
 # RUN go env -w GOFLAGS="-mod=vendor"
 
-RUN go get github.com/astaxie/beego && go get github.com/beego/bee && go get github.com/go-sql-driver/mysql
+# RUN go get github.com/astaxie/beego && go get github.com/beego/bee && go get github.com/go-sql-driver/mysql
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app . 
 
 # 采用alpine作为部署镜像的基础环境
