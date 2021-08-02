@@ -19,6 +19,9 @@ RUN go env -w GOPRIVATE="*.code.meikeland.com"
 # 将vendor包优先在打包环节使用
 # RUN go env -w GOFLAGS="-mod=vendor"
 
+
+RUN go get github.com/astaxie/beego && go get github.com/beego/bee && go get github.com/go-sql-driver/mysql
+
 # 执行打包命令
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o app .
 
@@ -42,5 +45,3 @@ COPY --from=golang-builder /go/src/com.github.com/jdc/static ./test.txt
 # 设置端口和执行程序
 EXPOSE 8062
 ENTRYPOINT ["./app"]
-
-# RUN go get github.com/astaxie/beego && go get github.com/beego/bee && go get github.com/go-sql-driver/mysql

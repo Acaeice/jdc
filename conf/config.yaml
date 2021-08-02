@@ -12,7 +12,7 @@ containers: #容器，可配置多个
   - path: /Users/cdle/Desktop/jd_study/jdc/list.sh
 qrcode: #自定义二维码页面，支持本地、网络路径
 static: ./static #静态文件 便于自定义二维码页面时，引入css、js等文件
-master: root #管理员账户pin，有多个用'&'拼接
+master: #管理员账户pin，有多个用'&'拼接
 database:  #数据库位置，默认./.jdc.db
 qywx_key:  #企业微信推送key
 daily_push: #定时任务
