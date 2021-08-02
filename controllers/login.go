@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/beego/beego/v2/core/logs"
 	"github.com/cdle/jd_study/jdc/models"
 
-	"github.com/astaxie/beego/httplib"
-	"github.com/astaxie/beego/logs"
+	"github.com/beego/beego/v2/client/httplib"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -48,7 +48,7 @@ func (c *LoginController) GetQrcode() {
 			if len(v.([]string)) == 2 {
 				var url = `https://plogin.m.jd.com/cgi-bin/m/tmauth?appid=300&client_type=m&token=` + token
 				data, _ := qrcode.Encode(url, qrcode.Medium, 256)
-				c.Ctx.WriteString("data:image/png;base64," + base64.StdEncoding.EncodeToString(data))
+				c.Ctx.WriteString(`{"url":"` + url + `","img":"` + base64.StdEncoding.EncodeToString(data) + `"}`)
 				return
 			}
 		}
@@ -125,7 +125,7 @@ func (c *LoginController) GetQrcode() {
 	data, _ = qrcode.Encode(url, qrcode.Medium, 256)
 	// fmt.Println(st.Token, cookie, okl_token)
 	JdCookieRunners.Store(st.Token, []string{cookie, okl_token})
-	c.Ctx.WriteString("data:image/png;base64," + base64.StdEncoding.EncodeToString(data))
+	c.Ctx.WriteString(`{"url":"` + url + `","img":"` + base64.StdEncoding.EncodeToString(data) + `"}`) //"data:image/png;base64," +
 }
 
 func init() {
@@ -222,25 +222,34 @@ func CheckLogin(token, cookie, okl_token string) string {
 		cookies := strings.Join(rsp.Header.Values("Set-Cookie"), " ")
 		pt_key := FetchJdCookieValue("pt_key", cookies)
 		pt_pin := FetchJdCookieValue("pt_pin", cookies)
+		if pt_pin == "" {
+			JdCookieRunners.Delete(token)
+			return sth.Message
+		}
 		go func() {
-			ScanedAt := time.Now().Local().Format("2006-01-02")
 			ck := models.JdCookie{
 				PtKey: pt_key,
 				PtPin: pt_pin,
 			}
 			if nck := models.GetJdCookie(ck.PtPin); nck != nil {
-				ck.Updates(map[string]interface{}{
-					"PtKey":     ck.PtKey,
-					"ScanedAt":  ScanedAt,
-					"Available": models.True,
+				ck.ToPool(ck.PtKey)
+				msg := fmt.Sprintf("更新账号，%s", ck.PtPin)
+				models.QywxNotify(&models.QywxConfig{
+					Content: msg,
 				})
-				logs.Info("更新账号，%s", ck.PtPin)
+				logs.Info(msg)
 			} else {
-				ck.ScanedAt = ScanedAt
+				ck.ScanedAt = time.Now().Local().Format("2006-01-02")
 				models.SaveJdCookie(ck)
-				logs.Info("添加账号，%s", ck.PtPin)
+				msg := &models.QywxConfig{
+					Content: fmt.Sprintf("添加账号，%s", ck.PtPin),
+				}
+				models.QywxNotify(msg)
+				logs.Info(msg)
 			}
-			models.Save <- &ck
+			go func() {
+				models.Save <- &ck
+			}()
 		}()
 		JdCookieRunners.Store(token, []string{pt_pin})
 		return "成功"

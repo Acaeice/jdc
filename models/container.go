@@ -8,10 +8,11 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 
-	"github.com/astaxie/beego/httplib"
+	"github.com/beego/beego/v2/client/httplib"
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/buger/jsonparser"
 )
@@ -27,34 +28,68 @@ func initContainer() {
 		if Config.Containers[i].Weigth == 0 {
 			Config.Containers[i].Weigth = 1
 		}
-		switch Config.Containers[i].Type {
-		case "ql":
+		Config.Containers[i].Type = ""
+		if Config.Containers[i].Address != "" {
 			vv := regexp.MustCompile(`^(https?://[\.\w]+:?\d*)`).FindStringSubmatch(Config.Containers[i].Address)
 			if len(vv) == 2 {
 				Config.Containers[i].Address = vv[1]
 			} else {
-				logs.Warn("ql地址：%s错误", Config.Containers[i].Address)
+				logs.Warn("%s地址错误", Config.Containers[i].Type)
 			}
 			version, err := GetQlVersion(Config.Containers[i].Address)
-			if Config.Containers[i].getToken() == nil {
-				logs.Info("ql" + version + "登录成功")
+			if err == nil {
+				if Config.Containers[i].getToken() == nil {
+					logs.Info("青龙" + version + "登录成功")
+				} else {
+					logs.Warn("青龙" + version + "登录失败")
+				}
+				Config.Containers[i].Type = "ql"
+				Config.Containers[i].Version = version
 			} else {
-				logs.Warn("ql" + version + "登录失败")
+				if err := Config.Containers[i].getSession(); err == nil {
+					logs.Info("v系登录成功")
+				} else {
+					logs.Info("v系登录失败")
+				}
+				Config.Containers[i].Type = "v4"
 			}
-			if err != nil {
-				logs.Warn("ql版本识别失败")
-			}
-			Config.Containers[i].Version = version
-		case "v4", "li":
+		} else if Config.Containers[i].Path != "" {
 			f, err := os.Open(Config.Containers[i].Path)
 			if err != nil {
-				logs.Warn("无法打开" + Config.Containers[i].Type + "配置文件，请检查路径是否正确")
+				logs.Warn("无法打开%s，请检查路径是否正确", Config.Containers[i].Path)
 			} else {
+				rd := bufio.NewReader(f)
+				for {
+					line, err := rd.ReadString('\n') //以'\n'为结束符读入一行
+					if err != nil || io.EOF == err {
+						break
+					}
+					if pt := regexp.MustCompile(`^pt_key=`).FindString(line); pt != "" {
+						Config.Containers[i].Type = "li"
+						break
+					}
+					if pt := regexp.MustCompile(`^Cookie\d+`).FindString(line); pt != "" {
+						Config.Containers[i].Type = "v4"
+						break
+					}
+					if strings.Contains(line, "TempBlockCookie") {
+						Config.Containers[i].Type = "v4"
+						break
+					}
+					if strings.Contains(line, "QYWX_KEY") {
+						Config.Containers[i].Type = "v4"
+						break
+					}
+				}
+				if Config.Containers[i].Type == "" {
+					Config.Containers[i].Type = "li"
+				}
 				f.Close()
 				logs.Info(Config.Containers[i].Type + "配置文件正确")
 			}
 		}
 	}
+	killp()
 }
 
 func (c *Container) write(cks []JdCookie) error {
@@ -88,43 +123,21 @@ func (c *Container) write(cks []JdCookie) error {
 			}
 		}
 	case "v4":
-		config := ""
-		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE, 0777) //打开文件 |os.O_RDWR
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		rd := bufio.NewReader(f)
-		for {
-			line, err := rd.ReadString('\n') //以'\n'为结束符读入一行
-			if err != nil || io.EOF == err {
-				break
+		return c.postConfig(func(config string) string {
+			TempBlockCookie := ""
+			cookies := ""
+			for i, ck := range cks {
+				if ck.PtPin == "" || ck.PtKey == "" {
+					continue
+				}
+				if ck.Available == False {
+					TempBlockCookie += fmt.Sprintf("%d ", i+1)
+				}
+				cookies += fmt.Sprintf("Cookie%d=\"pt_key=%s;pt_pin=%s;\"\n", i+1, ck.PtKey, ck.PtPin)
 			}
-			if pt := regexp.MustCompile(`^#?\s?Cookie(\d+)=\S+pt_key=(.*);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
-				continue
-			}
-			if pt := regexp.MustCompile(`^TempBlockCookie=`).FindString(line); pt != "" {
-				continue
-			}
-			if pt := regexp.MustCompile(`^Cookie\d+=`).FindString(line); pt != "" {
-				continue
-			}
-			config += line
-		}
-		TempBlockCookie := ""
-		for i, ck := range cks {
-			if ck.Available == False {
-				TempBlockCookie += fmt.Sprintf("%d ", i+1)
-			}
-			config = fmt.Sprintf("Cookie%d=\"pt_key=%s;pt_pin=%s;\"\n", i+1, ck.PtKey, ck.PtPin) + config
-		}
-		config = fmt.Sprintf(`TempBlockCookie="%s"`, TempBlockCookie) + "\n" + config
-		f.Truncate(0)
-		f.Seek(0, 0)
-		if _, err := io.WriteString(f, config); err != nil {
-			return err
-		}
-		return nil
+			config = fmt.Sprintf(`TempBlockCookie="%s"`, TempBlockCookie) + "\n" + cookies + config
+			return config
+		})
 	case "li":
 		config := ""
 		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE, 0777) //打开文件 |os.O_RDWR
@@ -141,9 +154,15 @@ func (c *Container) write(cks []JdCookie) error {
 			if pt := regexp.MustCompile(`^pt_key=(.*);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
 				continue
 			}
+			if pt := regexp.MustCompile(`^pt_key=(.*)`).FindStringSubmatch(line); len(pt) != 0 {
+				continue
+			}
 			config += line
 		}
 		for _, ck := range cks {
+			if ck.PtPin == "" || ck.PtKey == "" {
+				continue
+			}
 			if ck.Available == True {
 				config += fmt.Sprintf("pt_key=%s;pt_pin=%s\n", ck.PtKey, ck.PtPin)
 			}
@@ -196,12 +215,11 @@ func (c *Container) read() error {
 						})
 					} else {
 						if nck.PtKey != v[1] {
-							nck.toPool(v[1])
+							nck.ToPool(v[1])
 						}
 					}
 				}
 			}
-
 			return nil
 		} else {
 			var data, err = c.request("/api/cookies")
@@ -236,40 +254,46 @@ func (c *Container) read() error {
 						})
 					} else {
 						if res[1] != nck.PtKey {
-							nck.toPool(res[1])
+							nck.ToPool(res[1])
 						}
 					}
 				}
 			}
 		}
 	case "v4":
-		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE, 0777) //打开文件 |os.O_RDWR
-		if err != nil {
-			c.Available = false
-			return err
-		}
-		defer f.Close()
-		rd := bufio.NewReader(f)
-		for {
-			line, err := rd.ReadString('\n') //以'\n'为结束符读入一行
-			if err != nil || io.EOF == err {
-				break
-			}
-			if pt := regexp.MustCompile(`^#?\s?Cookie(\d+)=\S+pt_key=(.*);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
-				if nck := GetJdCookie(pt[3]); nck == nil {
-					SaveJdCookie(JdCookie{
-						PtKey:     pt[2],
-						PtPin:     pt[3],
-						Available: True,
-					})
-				} else {
-					if nck.PtKey != pt[2] {
-						nck.toPool(pt[2])
-					}
+		return c.getConfig(func(rd *bufio.Reader) string {
+			config := ""
+			for {
+				line, err := rd.ReadString('\n') //以'\n'为结束符读入一行
+
+				if err != nil || io.EOF == err {
+					config += line
+					break
 				}
-				continue
+				if pt := regexp.MustCompile(`^#?\s?Cookie(\d+)=\S+pt_key=(.+);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
+					if nck := GetJdCookie(pt[3]); nck == nil {
+						SaveJdCookie(JdCookie{
+							PtKey:     pt[2],
+							PtPin:     pt[3],
+							Available: True,
+						})
+					} else {
+						if nck.PtKey != pt[2] {
+							nck.ToPool(pt[2])
+						}
+					}
+					continue
+				}
+				if pt := regexp.MustCompile(`^Cookie\d+`).FindString(line); pt != "" {
+					continue
+				}
+				if pt := regexp.MustCompile(`^TempBlockCookie`).FindString(line); pt != "" {
+					continue
+				}
+				config += line
 			}
-		}
+			return config
+		})
 	case "li":
 		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE, 0777) //打开文件 |os.O_RDWR
 		if err != nil {
@@ -283,7 +307,7 @@ func (c *Container) read() error {
 			if err != nil || io.EOF == err {
 				break
 			}
-			if pt := regexp.MustCompile(`^pt_key=(.*);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
+			if pt := regexp.MustCompile(`^pt_key=(.+);pt_pin=([^'";\s]+);?`).FindStringSubmatch(line); len(pt) != 0 {
 				if nck := GetJdCookie(pt[2]); nck == nil {
 					SaveJdCookie(JdCookie{
 						PtKey:     pt[1],
@@ -292,7 +316,7 @@ func (c *Container) read() error {
 					})
 				} else {
 					if nck.PtKey != pt[1] {
-						nck.toPool(pt[1])
+						nck.ToPool(pt[1])
 					}
 				}
 				continue
@@ -392,3 +416,97 @@ const (
 	PUT    = "PUT"
 	DELETE = "DELETE"
 )
+
+func (c *Container) getConfig(handle func(*bufio.Reader) string) error {
+	if c.Address == "" {
+		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE, 0777) //打开文件 |os.O_RDWR
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		c.Config = handle(bufio.NewReader(f))
+	} else {
+		err := c.getSession()
+		if err != nil {
+			return err
+		}
+		req := httplib.Get(c.Address + "/api/config/config")
+		req.Header("Cookie", c.Token)
+		rsp, err := req.Response()
+		if err != nil {
+			return err
+		}
+		c.Config = handle(bufio.NewReader(rsp.Body))
+	}
+	return nil
+}
+
+func (c *Container) postConfig(handle func(config string) string) error {
+	if c.Address == "" {
+		f, err := os.OpenFile(c.Path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		f.WriteString(handle(c.Config))
+	} else {
+		req := httplib.Post(c.Address + "/api/save")
+		req.Header("Cookie", c.Token)
+		req.Param("content", handle(c.Config))
+		req.Param("name", "config.sh")
+		_, err := req.Bytes()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Container) getSession() error {
+	req := httplib.Post(c.Address + "/auth")
+	req.Param("username", c.Username)
+	req.Param("password", c.Password)
+	rsp, err := req.Response()
+	if err != nil {
+		return err
+	}
+	c.Token = rsp.Header.Get("Set-Cookie")
+	if data, err := ioutil.ReadAll(rsp.Body); err != nil {
+		return err
+	} else {
+		err, _ := jsonparser.GetInt(data, "err")
+		if err != 0 {
+			return errors.New(string(data))
+		}
+	}
+	return nil
+}
+
+func killp() {
+	pids, err := ppid()
+	if err == nil {
+		if len(pids) == 0 {
+			return
+		} else {
+			exec.Command("sh", "-c", "kill -9 "+strings.Join(pids, " ")).Output()
+		}
+	} else {
+		return
+	}
+}
+
+func ppid() ([]string, error) {
+	pid := fmt.Sprint(os.Getpid())
+	pids := []string{}
+	rtn, err := exec.Command("sh", "-c", "pidof jdc").Output()
+	if err != nil {
+		return pids, err
+	}
+	re := regexp.MustCompile(`[\d]+`)
+	for _, v := range re.FindAll(rtn, -1) {
+		if string(v) != pid {
+			pids = append(pids, string(v))
+		}
+	}
+	return pids, nil
+}
