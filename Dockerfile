@@ -4,7 +4,7 @@ WORKDIR /go/src/com.github.com/jdc
 # 将代码从代码库复制到打包环境的WORKDIR
 COPY . .
 # 将main文件，从cmd中复制到WORKDIR的根目录
-COPY cmd/jdc/main.go ./main.go
+COPY main.go ./main.go
 
 
 # 设置module模式的go打包环境
