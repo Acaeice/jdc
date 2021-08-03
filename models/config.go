@@ -37,6 +37,8 @@ type Yaml struct {
 	Database   string
 	QywxKey    string `yaml:"qywx_key"`
 	Resident   string
+	UserAgent  string `yaml:"user_agent"`
+	Theme      string
 }
 
 var Balance = "balance"
@@ -76,5 +78,8 @@ func initConfig() {
 	}
 	if Config.Mode != Parallel {
 		Config.Mode = Balance
+	}
+	if Config.Qrcode != "" {
+		Config.Theme = Config.Qrcode
 	}
 }
