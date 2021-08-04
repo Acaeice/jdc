@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"github.com/cdle/jd_study/jdc/models"
+	"github.com/Acaeice/jdc/models"
 )
 
 type AccountController struct {

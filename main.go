@@ -9,9 +9,9 @@ import (
 	"github.com/beego/beego/v2/core/logs"
 	"github.com/beego/beego/v2/server/web/context"
 
+	"github.com/Acaeice/jdc/controllers"
+	"github.com/Acaeice/jdc/models"
 	"github.com/beego/beego/v2/server/web"
-	"github.com/cdle/jd_study/jdc/controllers"
-	"github.com/cdle/jd_study/jdc/models"
 )
 
 var theme = ""
