@@ -1,10 +1,9 @@
 package jdcsdk
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 )
 
 const (
@@ -18,26 +17,16 @@ type Body struct {
 	Img        string `json:"img"`
 }
 
-func GetQrcode() (*Body, error) {
+func GetQrcode() ([]byte, error) {
 	uri := fmt.Sprintf(getQrcode, host)
-	result := &struct {
-		ResultCode string `json:"resultCode"`
-		ResultMsg  string `json:"resultMsg"`
-	}{}
-	resp, err := client.Net.Get(uri).End(nil, result)
+	resp, err := http.Get(uri)
 	if err != nil {
-		return nil, netError(err)
+		return nil, err
 	}
-	if result.ResultCode != respOk {
-		return nil, errors.New(result.ResultMsg)
-	}
+	// defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	resultqrcode := Body{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, err
-	}
-	return &resultqrcode, nil
+	return body, nil
 }
