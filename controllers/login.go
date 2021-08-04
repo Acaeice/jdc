@@ -36,6 +36,11 @@ type StepThree struct {
 	Message string `json:"message"`
 }
 
+type Body struct {
+	Url string `json:"url" form:"url"`
+	Img string `json:"img" form:"img"`
+}
+
 var JdCookieRunners sync.Map
 var jdua = models.GetUserAgent
 
