@@ -46,6 +46,7 @@ var jdua = models.GetUserAgent
 
 func (c *LoginController) GetQrcode() {
 	if v := c.GetSession("jd_token"); v != nil {
+		fmt.Println("__________________________________________")
 		token := v.(string)
 		if v, ok := JdCookieRunners.Load(token); ok {
 			if len(v.([]string)) == 2 {
@@ -127,6 +128,8 @@ func (c *LoginController) GetQrcode() {
 	c.SetSession("jd_okl_token", okl_token)
 	data, _ = qrcode.Encode(url, qrcode.Medium, 256)
 	// fmt.Println(st.Token, cookie, okl_token)
+	k := c.GetSession("jd_token")
+	fmt.Printf("+++++++++++++++++++++++++++++++++++++=%v", k.(string))
 	JdCookieRunners.Store(st.Token, []string{cookie, okl_token})
 	c.Ctx.WriteString(`{"url":"` + url + `","img":"` + base64.StdEncoding.EncodeToString(data) + `"}`) //"data:image/png;base64," +
 }
@@ -160,12 +163,16 @@ func init() {
 
 //Query 查询
 func (c *LoginController) Query() {
+	k := c.GetSession("jd_token")
+	fmt.Printf("%v", k)
 	if v := c.GetSession("jd_token"); v == nil {
+		fmt.Println("11111111111111111111111111111111111")
 		c.Ctx.WriteString("重新获取二维码")
 		return
 	} else {
 		token := v.(string)
 		if v, ok := JdCookieRunners.Load(token); !ok {
+			fmt.Println("1111111111122222222222222221111111111111111111")
 			c.Ctx.WriteString("重新获取二维码")
 			return
 		} else {
